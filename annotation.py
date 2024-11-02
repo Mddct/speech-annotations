@@ -37,8 +37,6 @@ def batch_audio_iterator(
     for ts in timestamps_iterator:
         start, end = ts['start'], ts['end']
         clip = audio[start * 1000:end * 1000]
-        clip.set_frame_rate(16000)
-        clip.set_sample_width(2)
         with io.BytesIO() as fobj:
             clip.export(
                 fobj,
@@ -56,25 +54,28 @@ def batch_audio_iterator(
 
 def main(in_path):
 
-    vad = SileroVAD(min_silence_duration_ms=100)
+    vad = SileroVAD(min_silence_duration_ms=250)
     recognizer = load_model()
 
     audio = pydub.AudioSegment.from_file(in_path)
-    audio.set_frame_rate(16000)
-    audio.set_sample_width(2)
+
+    # convert to 16k 16bit mono
+    audio = audio.set_frame_rate(16000).set_sample_width(2).set_channels(1)
 
     with io.BytesIO() as vad_fobj:
-        audio.export(vad_fobj, format='wav')
+        audio.export(vad_fobj, format='wav', bitrate='256k')
         vad_fobj.seek(0)
         for (_, batch) in enumerate(batch_audio_iterator(vad, vad_fobj,
                                                          audio)):
             audio_batch = [io.BytesIO(sample['wav']) for sample in batch]
             for i, result in enumerate(
                     recognizer.transcribe_batch(audio_batch, True)):
+                result['start'] = batch[i]['start']
+                result['end'] = batch[i]['end']
                 for token in result['tokens']:
                     token['start'] += batch[i]['start']
                     token['end'] += batch[i]['start']
-                print(batch[i]['end'], result)
+                print(result)
             for clip_fobj in audio_batch:
                 clip_fobj.close()
 
